@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 axum = "0.6.18"
 axum-macros = "0.3.7"
+chrono = "0.4.26"
 reqwest = "0.11.18"
 scraper = "0.16.0"
 serde = { version = "1.0.163", features = ["derive"] }

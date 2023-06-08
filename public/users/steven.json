@@ -2,17 +2,21 @@
     "id": 1,
     "name": "Stebe Blub",
     "titles": [
-        {
-            "id": 1,
-            "title": "One Piece",
-            "cover_url": "localhost:3000",
-            "current_chapter": 1,
-            "chapters": [
-                {
-                     "id": 1,
-                     "text": "The Prologue"
-                }
-            ]
-        }
+        [
+            1,
+            {
+                "id": 1,
+                "title": "One Piece",
+                "updated": "2023-06-03",
+                "url": "localhost:3000",
+                "chapters": [
+                    {
+                        "id": 1,
+                        "description": "The Prologue",
+                        "url": "yaba.com"
+                    }
+                ]
+            }
+        ]
     ]
 }
