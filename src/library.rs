@@ -9,7 +9,8 @@ use crate::{
     storage::TITLE_PATH,
     web,
     story::{Title, Chapter},
-    timestamp::{get_time},
+    timestamp::get_time,
+    latency::Latency,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -53,21 +54,23 @@ fn get_new_id(library: &Library) -> u32 {
     new_id
 }
 
-pub async fn add_title(url: String) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn add_title(url: String) -> Result<Title, Box<dyn std::error::Error>> {
     let mut library = load_library().await;
+    let mut timer = Latency::new("library add_title");
 
     // edge case
     if let Some(title) = get_title_by_url(&url, &library) {
         println!("Title already exists: {}", title.title);
-        return Ok(());
+        return Ok(title);
     }
 
     // scrape for details (title, cover, chapters)
-    let (title, cover_url, links) = web::scout_title(&url).await;
+    let (titlename, cover_url, links) = web::scout_title(&url).await;
+    timer.tick("got chapter data from web");
 
     let title = Title {
         id: get_new_id(&library),
-        title,
+        title: titlename,
         updated: get_time(),
         url: url.clone(),
         chapters: links.into_iter()
@@ -87,26 +90,40 @@ pub async fn add_title(url: String) -> Result<(), Box<dyn std::error::Error>> {
     let img_response = web::create_client().await
         .get(cover_url).send().await?;
     storage::save_cover(&title.id, img_response).await;
+    timer.tick("downloaded cover img");
 
     // Add Title to Library JSON
-    library.titles.push(title);
+    library.titles.push(title.clone());
     save_library(library).await;
 
-    Ok(())
+    Ok(title)
 }
 
-pub async fn remove_title(url: String) -> Result<(), Box<dyn std::error::Error>> {
-    let mut library = load_library().await;
-
-    let result = library.titles.iter().position(|title| title.url == url);
-    if result.is_none() {
+pub async fn remove_title_by_url(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let library = load_library().await;
+    let wrapped_index = library.titles.iter().position(|title| title.url == url);
+    if wrapped_index.is_none() {
         println!("Title does not exist: {}", url);
         return Ok(());
     }
-    let index = result.unwrap();
-    let title = &library.titles[index];
 
-    storage::remove_title(&title.id).await;
+    let index = wrapped_index.unwrap();
+    remove_title_by_id(&(index as u32)).await
+} 
+
+pub async fn remove_title_by_id(id: &u32) -> Result<(), Box<dyn std::error::Error>> {
+    let mut timer = Latency::new("library remove_title");
+    
+    if let Err(e) = storage::remove_title(id).await {
+        println!("Message from storage::remove_title: {}", e);
+        return Ok(());
+    }
+
+    storage::remove_title(id).await?;
+    timer.tick("removed title folder");
+    
+    let mut library = load_library().await;
+    let index = library.titles.iter().position(|title| title.id == *id).unwrap();
 
     // Remove Title from Library JSON
     if index != library.titles.len() - 1 {
@@ -117,6 +134,7 @@ pub async fn remove_title(url: String) -> Result<(), Box<dyn std::error::Error>>
 
     // Write Library to File
     save_library(library).await;
+    timer.tick("changed library.json");
 
     Ok(())
 }
@@ -127,7 +145,7 @@ pub async fn add_chapter(title_id: &u32, chapter_id: &u32) -> Result<(), Box<dyn
     let library = load_library().await;
     let title = get_title_by_id(*title_id, &library).unwrap();
     let chapter_url = title.chapters.get(*chapter_id as usize).unwrap().url.clone();
-    web::download_chapter(format!("{}/{}", title_id, chapter_id).as_str(), chapter_url.as_str()).await;
+    web::download_chapter(format!("{TITLE_PATH}/{title_id}/{chapter_id}").as_str(), chapter_url.as_str()).await.unwrap();
 
     Ok(())
 }

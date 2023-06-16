@@ -1,21 +1,21 @@
 use std::time::Instant;
 
-struct Latency {
-    now: Instant,
+pub struct Latency {
     recent: Instant,
+    context: String,
 }
 
 impl Latency {
-    pub fn new() -> Latency {
+    pub fn new(context: &str) -> Latency {
         Latency {
-            now: Instant::now(),
             recent: Instant::now(),
+            context: context.to_string(),
         }
     }
 
-    pub fn get(&mut self) {
+    pub fn tick(&mut self, description: &str) {
         let milliseconds = self.recent.elapsed().as_millis();
         self.recent = Instant::now();
-        println!("{}ms", milliseconds);
+        println!("⌚ {}: [{}ms] {}", self.context, milliseconds, description);
     }
 }

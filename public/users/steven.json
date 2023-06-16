@@ -1,22 +1,6 @@
 {
     "id": 1,
-    "name": "Stebe Blub",
+    "name": "Steven",
     "titles": [
-        [
-            1,
-            {
-                "id": 1,
-                "title": "One Piece",
-                "updated": "2023-06-03",
-                "url": "localhost:3000",
-                "chapters": [
-                    {
-                        "id": 1,
-                        "description": "The Prologue",
-                        "url": "yaba.com"
-                    }
-                ]
-            }
-        ]
     ]
 }
