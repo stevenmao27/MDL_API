@@ -1,25 +1,30 @@
 #![allow(non_snake_case)]
+#![allow(unused_imports)]
 #![warn(dead_code)]
-#![warn(unused_imports)]
+use std::error::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use axum::{
     extract::{Query, Path},
-    response::Json,
+    response::{Json, IntoResponse},
     routing::{get, post},
     Router,
     body::Body,
     http::StatusCode,
 };
-use axum_macros::debug_handler;
+// use axum_macros::debug_handler;
 use serde::Deserialize;
 
+mod library;
+mod user;
 mod story;
 mod timestamp;
-mod user;
-mod library;
-mod storage;
 mod web;
+mod storage;
 mod latency;
+
+use library::*;
+use user::*;
+
 
 #[tokio::main]
 async fn main() {
@@ -46,7 +51,7 @@ struct LoadQuery {
 /// 
 /// - fetches user's data from ./public/users
 async fn load_handler(Query(LoadQuery {username}): Query<LoadQuery>) -> Json<user::User> {
-    let user = user::load_user(username.as_str()).await;
+    let user = User::new(&username).await.unwrap();
     Json(user)
 }
 
@@ -62,11 +67,11 @@ struct NewTitleQuery {
 /// - if title doesn't exist in library, create it
 /// - add title to user profile
 async fn new_title_handler(Json(NewTitleQuery { username, url }): Json<NewTitleQuery>) -> Json<user::User> {
-    let mut user = user::load_user(username.as_str()).await;
+    let mut user = User::new(&username).await.unwrap();
 
-    if !user.title_exists(url.as_str()).await {
-        let title = library::add_title(url).await.unwrap();
-        user.add_title(title).await;
+    if !user.has_title(&url) {
+        let title = Library::new().await.unwrap().add_title(&url).await.unwrap();
+        user.add_title(&title);
         user.save_user().await.unwrap();
     }
 
@@ -84,12 +89,15 @@ struct RemoveTitleQuery {
 ///    - title doesn't exist in user profile
 /// - remove title from user profile
 /// - if title doesn't exist in any other user profile, remove it from library
-async fn remove_title_handler(Json(RemoveTitleQuery { username, id }): Json<RemoveTitleQuery>) {
-    let mut user = user::load_user(username.as_str()).await;
-    user.remove_title(id).await;
+async fn remove_title_handler(Json(RemoveTitleQuery { username, id }): Json<RemoveTitleQuery>) -> StatusCode  {
+    let mut user = User::new(&username).await.unwrap();
+    user.remove_title(id);
+    user.save_user().await.unwrap();
 
     // ! ASSUMES NO OTHER USER RIGHT NOW
-    library::remove_title_by_id(&id).await.unwrap();
+    Library::new().await.unwrap().remove_title(id).await.unwrap();
+
+    StatusCode::OK
 }
 
 #[derive(Deserialize)]
@@ -104,9 +112,9 @@ struct DownloadChapterQuery {
 ///     - chapter already downloaded
 /// - request chapter download
 /// - return OK
-#[debug_handler]
-async fn download_chapter_handler(Json(DownloadChapterQuery { title_id, chapter_id }): Json<DownloadChapterQuery>) {
-    library::add_chapter(&title_id, &chapter_id).await.unwrap();
+async fn download_chapter_handler(Json(DownloadChapterQuery { title_id, chapter_id }): Json<DownloadChapterQuery>) -> StatusCode {
+    Library::new().await.unwrap().add_chapter(&title_id, &chapter_id).await.unwrap();
+    StatusCode::OK
 }
 
 /// # Image request
@@ -114,7 +122,6 @@ async fn download_chapter_handler(Json(DownloadChapterQuery { title_id, chapter_
 /// - ERROR HANDLING
 ///     - path doesn't exist
 /// - read buffer and send it to client
-#[debug_handler]
 async fn image_request(Path((title_id, chapter_id, image_id)): Path<(u32, u32, u32)>) -> axum::http::Response<Body> {
     if let Ok(mut file) = File::open(format!("./public/titles/{}/{}/{}.jpg", title_id, chapter_id, image_id)).await {
         let mut buf = Vec::new();

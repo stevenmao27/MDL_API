@@ -1,3 +1,4 @@
+use std::error::Error;
 use reqwest::{
     header::{HeaderMap, HeaderValue, REFERER, USER_AGENT},
     Client,
@@ -18,11 +19,11 @@ pub async fn create_client() -> Client {
         .unwrap()
 }
 
-pub async fn scout_title(url: &str) -> (String, String, Vec<(String, String)>) {
+pub async fn scout_title(url: &str) -> Result<(String, String, Vec<(String, String)>), Box<dyn Error>> {
     let mut timer = Latency::new("scout_title");
     // Scrape Chapter URLs
     let client = create_client().await;
-    let response = client.get(url).send().await.unwrap();
+    let response = client.get(url).send().await?;
 
     let body = response.text().await.unwrap();
     let document = Html::parse_document(&body);
@@ -31,11 +32,10 @@ pub async fn scout_title(url: &str) -> (String, String, Vec<(String, String)>) {
     let title_selector = Selector::parse(".story-info-right > h1").unwrap();
     let cover_selector = Selector::parse(".info-image > .img-loading").unwrap();
 
-    let mut links = document
+    let mut links: Vec<(String, String)> = document
         .select(&link_selector)
         .map(|link| (link.text().collect::<String>(), link.value().attr("href").unwrap().to_string()) )
-        .collect::<Vec<(String, String)>>();
-        // .collect::<Vec<scraper::ElementRef>>();
+        .collect();
     links.reverse();
     
     let title = document
@@ -53,18 +53,38 @@ pub async fn scout_title(url: &str) -> (String, String, Vec<(String, String)>) {
         .attr("src")
         .unwrap();
     
-    timer.tick("done");
-    (title, cover_url.to_string(), links)
+    timer.tick("done scouting new title");
+    Ok((title, cover_url.to_string(), links))
 }
 
-pub async fn download_chapter(chapter_dir: &str, url: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn get_chapters(url: &str) -> Result<Vec<(String, String)>, Box<dyn Error>> {
+    // Scrape Chapter URLs
+    let mut timer = Latency::new("get_chapters");
+    let client = create_client().await;
+    let response = client.get(url).send().await?;
+
+    let body = response.text().await.unwrap();
+    let document = Html::parse_document(&body);
+
+    let link_selector = Selector::parse(".row-content-chapter > li > a").unwrap();
+
+    let mut links = document
+        .select(&link_selector)
+        .map(|link| (link.text().collect::<String>(), link.value().attr("href").unwrap().to_string()) )
+        .collect::<Vec<(String, String)>>();
+    links.reverse();
+    timer.tick("done checking for new chapters");
+    Ok(links)
+}
+
+pub async fn download_chapter(chapter_dir: &str, url: &str) -> Result<(), Box<dyn Error>> {
     
     let mut threads = Vec::new();
     let mut timer = Latency::new("download_chapter");
     {
         // Simply Multithreads download_image
         let client = create_client().await;
-        let response = client.get(url).send().await.unwrap();
+        let response = client.get(url).send().await?;
         let body = response.text().await.unwrap();
         let document = Html::parse_document(&body);
         let selector = Selector::parse(".container-chapter-reader > img").unwrap();
@@ -82,7 +102,9 @@ pub async fn download_chapter(chapter_dir: &str, url: &str) -> Result<(), Box<dy
 
     // Wait for all threads to finish
     for thread in threads {
-        thread.await.unwrap().unwrap();
+        if let Err(e) = thread.await {
+            println!("download_image thread failed: {e}");
+        }
     }
     timer.tick("done downloading + saving all images");
     Ok(())
@@ -90,7 +112,7 @@ pub async fn download_chapter(chapter_dir: &str, url: &str) -> Result<(), Box<dy
 
 // Downloads image and saves it to path
 use tokio::{fs::File, io::AsyncWriteExt};
-async fn download_image_and_save(client: Client, url: String, path: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn download_image_and_save(client: Client, url: String, path: String) -> Result<(), Box<dyn Error + Send + Sync>> {
     let response = client.get(&url).send().await?;
     let bytes = response.bytes().await?;
 

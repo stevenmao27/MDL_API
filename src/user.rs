@@ -1,69 +1,85 @@
+use std::error::Error;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
 };
-use crate::{story::Title, timestamp};
+use crate::{story::{SystemTitle, Chapter}, timestamp};
 
-const USER_PATH: &str = "./public/users";
+const USERS_PATH: &str = "./public/users";
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UserTitle {
+    pub id: u32, // consistent with library id
+    pub title: String,
+    pub last_read: String, // YYYY-MM-DD
+    pub last_chap: u32, // chapter's ID
+    pub url: String,
+    pub chapters: Vec<Chapter>, // chapter's ID == index
+}
+
+impl UserTitle {
+    pub fn into_systemtitle(self) -> SystemTitle {
+        SystemTitle {
+            id: self.id,
+            title: self.title,
+            last_updated: String::new(),
+            url: self.url,
+            chapters: self.chapters,
+        }
+    }
+
+    pub fn set_timestamp(&mut self) {
+        self.last_read = timestamp::get_time();
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct User {
-    pub id: u32,
-    pub name: String,
-    pub titles: Vec<(TitleHistory, Title)>,
+    pub name: String, // identification for now
+    pub titles: Vec<UserTitle>,
 }
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct TitleHistory {
-    pub id: u32,
-    pub last_read: String,
-}
-
-pub async fn load_user(name: &str) -> User {
-    let mut file = File::open(format!("{}/{}.json", USER_PATH, name))
-        .await
-        .expect(format!("Could not open {}.json", name).as_str());
-    let mut content = String::new();
-    file.read_to_string(&mut content).await.unwrap();
-
-    serde_json::from_str(&content).expect(format!("Could not parse {}.json", name).as_str())
-}
-
-// pub async fn save_user(user: User) {
-//     let string = serde_json::to_string(&user).unwrap();
-//     let mut user_file = File::create(format!("{}/{}.json", USER_PATH, user.name))
-//         .await
-//         .unwrap();
-//     user_file.write_all(string.as_bytes()).await.unwrap();
-// }
 
 impl User {
-    pub async fn save_user(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let string = serde_json::to_string(self).unwrap();
-        let mut user_file = File::create(format!("{}/{}.json", USER_PATH, self.name))
-            .await
-            .unwrap();
-        user_file.write_all(string.as_bytes()).await.unwrap();
+    pub async fn new(name: &str) -> Result<User, Box<dyn Error>> {
+        let mut file = File::open(format!("{}/{}.json", USERS_PATH, name)).await?;
+        let mut content = String::new();
+        file.read_to_string(&mut content).await.unwrap();
+
+        let user: User = serde_json::from_str(&content).expect("Failed to deserialize user. Has the user been tampered with?");
+        Ok(user)
+    }
+
+    pub async fn create_user(name: &str) -> User {
+        User {
+            name: name.to_string(),
+            titles: Vec::new(),
+        }
+    }
+
+    pub async fn save_user(&self) -> Result<(), Box<dyn Error>> {
+        let string = serde_json::to_string(self)?;
+        let mut user_file = File::create(format!("{}/{}.json", USERS_PATH, self.name)).await?;
+        user_file.write_all(string.as_bytes()).await?;
 
         Ok(())
     }
 
-    pub async fn title_exists(&self, url: &str) -> bool {
-        for (_, title) in &self.titles {
-            if title.url == url {
-                return true;
-            }
+    pub fn has_title(&self, url: &str) -> bool {
+        self.titles.iter().any(|title| title.url == url)
+    }
+
+    pub fn add_title(&mut self, title: &SystemTitle) {
+        if !self.has_title(&title.url) {
+            let new_title = title.clone().into_usertitle();
+            self.titles.push(new_title);
+        } else {
+            println!("User {} already has title {}", self.name, title.title);
         }
-
-        false
     }
 
-    pub async fn add_title(&mut self, title: Title) {
-        self.titles.push((TitleHistory { id: 1, last_read: timestamp::get_time() }, title));
-    }
-
-    pub async fn remove_title(&mut self, title_id: u32) {
-        self.titles.retain(|title| title.1.id != title_id);
+    pub fn remove_title(&mut self, title_id: u32) {
+        self.titles.retain(|title| title.id != title_id);
     }
 }
