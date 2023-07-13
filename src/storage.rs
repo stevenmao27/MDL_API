@@ -65,7 +65,7 @@ pub async fn setup_chapter(title_id: &u32, chapter_id: &u32) -> StorageResult {
         }
     }
 
-    StorageResult::Done
+    StorageResult::Success
 }
 
 pub async fn delete_chapter(title_id: &u32, chapter_id: &u32) {
@@ -79,9 +79,48 @@ pub async fn delete_chapter(title_id: &u32, chapter_id: &u32) {
     }
 }
 
+pub async fn get_num_images(title_id: u32, chapter_id: u32) -> u32 {
+    let mut num_images = 0;
+    match tokio::fs::read_dir(format!("{}/{}/{}", TITLE_PATH, title_id, chapter_id)).await {
+        Ok(mut directory) => {
+            while let Some(entry) = directory.next_entry().await.unwrap() {
+                if entry.file_type().await.unwrap().is_file() {
+                    num_images += 1;
+                }
+            }
+        },
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                println!("Folder id = {title_id} not found.")
+            } else {
+                panic!("storage::get_num_images failed. Error: {}", e);
+            }
+        }
+    }
+    num_images
+}
+
+pub async fn get_chapters(title_id: u32) -> Vec<u32> {
+    let mut chapters = Vec::new();
+    match tokio::fs::read_dir(format!("{}/{}", TITLE_PATH, title_id)).await {
+        Ok(mut directory) => {
+            while let Some(entry) = directory.next_entry().await.unwrap() {
+                if entry.file_type().await.unwrap().is_dir() {
+                    chapters.push(entry.file_name().into_string().unwrap().parse::<u32>().unwrap());
+                }
+            }
+        },
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                println!("Folder id = {title_id} not found.")
+            } else {
+                panic!("storage::get_chapters failed. Error: {}", e);
+            }
+        }
+    }
+    chapters
+}
 pub enum StorageResult {
-    Done,
+    Success,
     AlreadyExists,
-    NotFound,
-    UnknownError,
 }

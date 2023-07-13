@@ -47,7 +47,7 @@ impl User {
         let mut content = String::new();
         file.read_to_string(&mut content).await.unwrap();
 
-        let user: User = serde_json::from_str(&content).expect("Failed to deserialize user. Has the user been tampered with?");
+        let user: User = serde_json::from_str(&content).expect("Failed to deserialize user. Has the user been corrupted?");
         Ok(user)
     }
 

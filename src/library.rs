@@ -10,7 +10,7 @@ use crate::{
     storage::*,
     web,
     story::{SystemTitle, Chapter},
-    timestamp::get_time,
+    timestamp::{get_time, self},
     latency::Latency,
 };
 
@@ -113,22 +113,22 @@ impl Library {
         }
     }
 
-    pub async fn add_chapter(&self, title_id: &u32, chapter_id: &u32) -> Result<(), Box<dyn Error>> {
+    pub async fn add_chapter(&self, title_id: &u32, chapter_id: &u32) -> Result<u32, Box<dyn Error>> {
 
         // what if title doesn't exist?
         // note: we assume chapter id exists
         match self.get_title_by_id(*title_id) {
             Some(title) => {
-                if let StorageResult::AlreadyExists = storage::setup_chapter(title_id, chapter_id).await {
-                    println!("Chapter already downloaded: {}/{}", title_id, chapter_id);
-                    return Ok(());
+                match storage::setup_chapter(title_id, chapter_id).await {
+                    StorageResult::Success => {
+                        let chapter_url = title.chapters.get(*chapter_id as usize).unwrap().url.as_str();
+                        web::download_chapter(&format!("{TITLE_PATH}/{title_id}/{chapter_id}"), chapter_url).await.unwrap();
+                    }
+                    StorageResult::AlreadyExists => {
+                        println!("Chapter already downloaded: {}/{}", title_id, chapter_id);
+                    }
                 }
-
-                // let chapter_url = title.url.clone() + "/" + title.chapters.get(*chapter_id as usize).unwrap().sufx.as_str();
-                let chapter_url = title.chapters.get(*chapter_id as usize).unwrap().url.as_str();
-                web::download_chapter(&format!("{TITLE_PATH}/{title_id}/{chapter_id}"), chapter_url).await.unwrap();
-
-                Ok(())
+                Ok(storage::get_num_images(*title_id, *chapter_id).await)
             }
             None => {
                 println!("Title does not exist: {}", title_id);
@@ -146,6 +146,27 @@ impl Library {
             None => {
                 println!("Title does not exist: {}", title_id);
                 Err("Title does not exist".into())
+            }
+        }
+    }
+
+    pub async fn cleanup(&mut self) {
+        // TODO: delete old titles (assume multiple users)
+        // delete old chapters
+        let MAX_CHAPTERS: usize = 5;
+        
+        for title in &self.titles {
+            let days_since_updated = timestamp::get_duration(title.last_updated.clone(), timestamp::get_time());
+            let mut chapters = storage::get_chapters(title.id).await;
+
+            if days_since_updated >= 3 {
+                storage::clear_title(&title.id).await;
+            }
+            else if chapters.len() > MAX_CHAPTERS {
+                chapters.sort();
+                for i in 0..(chapters.len() - MAX_CHAPTERS) {
+                    storage::delete_chapter(&title.id, &chapters[i]).await;
+                }
             }
         }
     }
