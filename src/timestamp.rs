@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDate};
 
 pub fn get_time() -> String {
     let now: DateTime<Utc> = Utc::now();
@@ -6,8 +6,8 @@ pub fn get_time() -> String {
 }
 
 pub fn get_duration(start: String, end: String) -> i32 {
-    let start = start.parse::<DateTime<Utc>>().unwrap();
-    let end = end.parse::<DateTime<Utc>>().unwrap();
+    let start = chrono::NaiveDate::parse_from_str(&start, "%Y-%m-%d").unwrap();
+    let end = chrono::NaiveDate::parse_from_str(&end, "%Y-%m-%d").unwrap();
     let duration = end - start;
     duration.num_days() as i32
 }

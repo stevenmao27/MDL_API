@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Library {
-    titles: Vec<SystemTitle>,
+    pub titles: Vec<SystemTitle>,
 }
 
 impl Library {
@@ -113,6 +113,20 @@ impl Library {
         }
     }
 
+    pub async fn update_all_titles(&mut self) {
+        for title in self.titles.iter_mut() {
+            title.last_updated = get_time();
+            let links = web::get_chapters(&title.url).await.unwrap();
+            title.chapters = links.into_iter()
+                .map(|element| Chapter {
+                    desc: element.0,
+                    url: element.1,
+                    // sufx: element.1.split('/').last().unwrap().to_string(),
+                    })
+                .collect::<Vec<Chapter>>();
+        }
+    }
+
     pub async fn add_chapter(&self, title_id: &u32, chapter_id: &u32) -> Result<u32, Box<dyn Error>> {
 
         // what if title doesn't exist?
@@ -125,7 +139,7 @@ impl Library {
                         web::download_chapter(&format!("{TITLE_PATH}/{title_id}/{chapter_id}"), chapter_url).await.unwrap();
                     }
                     StorageResult::AlreadyExists => {
-                        println!("Chapter already downloaded: {}/{}", title_id, chapter_id);
+                        // println!("Chapter already downloaded: {}/{}", title_id, chapter_id);
                     }
                 }
                 Ok(storage::get_num_images(*title_id, *chapter_id).await)
@@ -153,16 +167,17 @@ impl Library {
     pub async fn cleanup(&mut self) {
         // TODO: delete old titles (assume multiple users)
         // delete old chapters
-        let MAX_CHAPTERS: usize = 5;
+        let MAX_CHAPTERS: usize = 3;
+        let MAX_DAYS: i32 = 3;
         
         for title in &self.titles {
             let days_since_updated = timestamp::get_duration(title.last_updated.clone(), timestamp::get_time());
             let mut chapters = storage::get_chapters(title.id).await;
 
-            if days_since_updated >= 3 {
+            if days_since_updated >= MAX_DAYS {
                 storage::clear_title(&title.id).await;
             }
-            else if chapters.len() > MAX_CHAPTERS {
+            else if chapters.len() >= MAX_CHAPTERS {
                 chapters.sort();
                 for i in 0..(chapters.len() - MAX_CHAPTERS) {
                     storage::delete_chapter(&title.id, &chapters[i]).await;

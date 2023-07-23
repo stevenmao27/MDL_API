@@ -58,7 +58,7 @@ pub async fn setup_chapter(title_id: &u32, chapter_id: &u32) -> StorageResult {
     // Create Folder
     if let Err(e) = create_dir(format!("{}/{}/{}", TITLE_PATH, title_id, chapter_id)).await {
         if e.kind() == ErrorKind::AlreadyExists {
-            println!("Folder id = {title_id} already exists.");
+            // println!("Folder id = {title_id} already exists.");
             return StorageResult::AlreadyExists;
         } else {
             panic!("storage::setup_chapter failed. Error: {}", e);

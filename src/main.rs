@@ -2,18 +2,18 @@
 #![allow(unused_imports)]
 #![warn(dead_code)]
 use std::error::Error;
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::{fs::File, io::AsyncReadExt, sync::RwLock};
 use axum::{
     extract::{Query, Path},
     response::{Json, IntoResponse, Response},
     routing::{get, post},
     Router,
     body::Body,
-    http::{StatusCode, HeaderValue},
+    http::{StatusCode, HeaderValue, method::Method},
 };
 // use axum_macros::debug_handler;
 use serde::Deserialize;
-use tower_http;
+use tower_http::cors;
 
 mod library;
 mod user;
@@ -26,10 +26,35 @@ mod latency;
 use library::*;
 use user::*;
 
+static UPDATING_CHAPTERS: RwLock<bool> = RwLock::const_new(false);
 
 #[tokio::main]
 async fn main() {
-    // build our application with a single route
+
+    tokio::spawn(async {
+        let mut library = Library::new().await.unwrap();
+        loop {
+            println!("Cleaning up library... ");
+            library.cleanup().await;
+            println!(" Updating titles... ");
+            {
+                let mut lock = UPDATING_CHAPTERS.write().await;
+                *lock = true;
+            }
+            library.update_all_titles().await;
+            {
+                let mut lock = UPDATING_CHAPTERS.write().await;
+                *lock = false;
+            }
+            println!(" Done!");
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60)).await;
+        }
+    });
+
+    // CORS setup
+    let cors = cors::CorsLayer::permissive();
+    // build our application with a single router
     let app = Router::new()
     .route("/load", get(load_handler))
     .route("/img/:title_id/:chapter_id/:image_id", get(image_request))
@@ -41,8 +66,7 @@ async fn main() {
     .route("/update_title", post(update_title_handler))
     .route("/save_user", post(save_user_handler))
 
-    .layer(tower_http::cors::CorsLayer::new().allow_origin("*".parse::<HeaderValue>().unwrap()));
-
+    .layer(cors);
     // run it with hyper on localhost:3000
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service())
@@ -107,14 +131,13 @@ async fn remove_title_handler(Json(RemoveTitleBody { username, id }): Json<Remov
 }
 
 
-
 #[derive(Deserialize)]
 struct DownloadChapterBody {
     title_id: u32,
     chapter_id: u32,
 }
 /// # Request chapter download
-/// - request chapter download
+/// - returns number of images in chapter
 async fn download_chapter_handler(Json(DownloadChapterBody { title_id, chapter_id }): Json<DownloadChapterBody>) -> String {
     Library::new().await.unwrap().add_chapter(&title_id, &chapter_id).await.unwrap().to_string()
 }
@@ -128,6 +151,7 @@ async fn update_title_handler(Json(UpdateChaptersBody { title_id }): Json<Update
     Library::new().await.unwrap().update_title(title_id).await.unwrap();
     StatusCode::OK
 }
+
 
 /// # Image request
 /// - read buffer and send it to client
